@@ -1,0 +1,287 @@
+<?php
+/**
+ * @file
+ * The commons_achievements module sets up configuration for
+ * badges/achievements.
+ */
+
+/**
+ * Implements hook_achievements_info().
+ */
+function commons_achievements_achievements_info() {
+  $image_path = drupal_get_path('module', 'commons_achievements') . '/images/';
+
+  $achievements = array();
+  $achievements = array(
+    'inappropriate' => array(
+      'title'       => t('Defender'),
+      'description' => t('You flagged 10 stories as inappropriate.'),
+      'points'      => 100,
+      'secret' => TRUE,
+      /*'images' => array(
+        'unlocked'  => $image_path . 'inappropriate.png',
+        'locked'    => $image_path . 'locked_achievement_icon.png',
+      ),*/
+    ),
+    'comment-creation' => array(
+      'title' => t('Comment creation'),
+      'achievements' => array(
+        'comment-count-3' => array(
+          'title' => t('Posted 3 comments!'),
+          'description' => t('Now you\'re getting the hang of it.'),
+          'storage' => 'comment-count',
+          'points' => 3,
+          'secret' => TRUE,
+          /*'images' => array(
+            'unlocked'  => $image_path . 'comment-count-3.png',
+            'locked'    => $image_path . 'locked_achievement.png',
+          ),*/
+        ),
+        'comment-count-1000' => array(
+          'title' => t('Posted 1000 comments!'),
+          'description' => t('Holy moly'),
+          'storage' => 'comment-count',
+          'points' => 1000,
+          /*'images' => array(
+            'unlocked'  => $image_path . 'comment-count-1000.png',
+            'locked'    => $image_path . 'locked_achievement.png',
+          ),*/
+        ),
+      ),
+    ),
+    'node-creation' => array(
+      'title' => t('Node creation'),
+      'achievements' => array(
+        'node-count-20' => array(
+          'title' => variable_get('site_name') . ' ' . t('regular'),
+          'storage' => 'node-count',
+          'points' => 20,
+          /*'images' => array(
+            'unlocked' => $image_path . 'node-count-20.png',
+            'locked'   => $image_path . 'locked_achievement.png',
+          ),*/
+        ),
+        'node-weekends' => array(
+          'title'       => t('Published some content on the weekend'),
+          'description' => t("Go back to bed: it's the weekend!"),
+          'points'      => 5,
+          /*'images' => array(
+            'unlocked'  => $image_path . 'node-weekends.png',
+          ),*/
+        ),
+      ),
+    ),
+  );
+  return $achievements;
+}
+
+/**
+ * Implements hook_comment_insert().
+ */
+function commons_achievements_comment_insert($comment) {
+  $current_count = achievements_storage_get('comment-count', $comment->uid) + 1;
+  achievements_storage_set('comment-count', $current_count, $comment->uid);
+
+  foreach (array(3, 1000) as $count) {
+    if ($current_count == $count) {
+      achievements_unlocked('comment-count-' . $count, $comment->uid);
+    }
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function commons_achievements_node_insert($node) {
+  // Sometimes, we don't need any storage at all.
+  $day_of_week = format_date(REQUEST_TIME, 'custom', 'w');
+  if ($day_of_week == 0 || $day_of_week == 6) {
+    achievements_unlocked('node-weekends', $node->uid);
+  }
+
+  $current_count = achievements_storage_get('node-count', $node->uid) + 1;
+  achievements_storage_set('node-count', $current_count, $node->uid);
+  if ($current_count === 20) {
+    achievements_unlocked('node-count-20', $node->uid);
+  }
+}
+
+/**
+ * Implements hook_flag().
+ */
+function commons_achievements_flag($op, $flag, $content_id, $account, $fcid) {
+  $flag_count_flag_name = achievements_storage_get('flag-' . $flag->name, $account->uid) + 1;
+  achievements_storage_set('flag-' . $flag->name, $flag_count_flag_name, $account->uid);
+
+  if ($flag->name == 'inappropriate_node' || $flag->name ==
+    'inappropriate_comment' && $flag_count_flag_name >= 10) {
+    achievements_unlocked('inappropriate', $account->uid);
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function commons_achievements_theme($existing, $type, $theme, $path) {
+  return array(
+    'commons_achievements_user' => array(
+      'variables' => array(
+        'badges' => NULL,
+      ),
+      'template' => 'theme/commons-achievements-user',
+    ),
+  );
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function commons_achievements_block_info() {
+  $blocks = array();
+
+  $blocks['commons-achievements-user'] = array(
+    'info' => t('Achievements'),
+  );
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function commons_achievements_block_view($delta = '') {
+  switch ($delta) {
+    case 'commons-achievements-user':
+      $block['subject'] = t('Achievements');
+      $block['content'] = commons_achievements_block_content($delta);
+      break;
+  }
+  return $block;
+}
+
+/**
+ * A module-defined block content function.
+ */
+function commons_achievements_block_content($delta) {
+  switch ($delta) {
+    case 'commons-achievements-user':
+      // Define required variables.
+      global $user;
+      $achievements = achievements_load();
+
+      // Generate render arrays for achievement badges.
+      $badges = array();
+      foreach ($achievements as $aid => $achievement) {
+        if (achievements_unlocked_already($aid, $user->uid)) {
+
+          $vars = array(
+            'achievement' => $achievement,
+            'unlock' => TRUE,
+            'state' => 'unlocked',
+          );
+          achievements_template_shared_variables($vars);
+          $path = url('achievements/leaderboard/' . $achievement['id']);
+
+          $badges[$aid] = array(
+            '#attributes' => array(),
+            'title' => $achievement['title'],
+            'path' => $path,
+            'image' => array(
+              '#theme' => 'image_formatter',
+              '#item' => array(
+                'uri'   => $vars['image_path'],
+                'alt'   => $achievement['title'],
+                'title' => $achievement['title'],
+              ),
+            ),
+          );
+        }
+      }
+
+      // Generate render arrays for various application-specific statistics.
+      $stats = array();
+
+      // Load top achievers on site.
+      module_load_include('inc', 'achievements', 'achievements.pages');
+      if ($top_achievers = _commons_achievements_top_achievers()) {
+        $top_achiever = array_shift($top_achievers);
+        $suffix = t(' Points earned by top achiever');
+        $stats['top-achiever-stats'] = array(
+          '#attributes' => array(
+            'class' => array('top-achiever-stats'),
+          ),
+          'count' => $top_achiever->points,
+          '#suffix' => $suffix,
+          'path' => url('achievements/leaderboard'),
+        );
+      }
+
+      // Load achiever info.
+      if (!$achiever = array_pop(achievements_totals_user(0, $user->uid))) {
+        // If user has no achievements, set default values.
+        $achiever = new stdClass();
+        $achiever->rank = 0;
+        $achiever->points = 0;
+        $achiever->unlocks = 0;
+      }
+
+      // Get achievement ranking for current user.
+      $suffix = t('Your ranking of all participants');
+      $stats['user-achievement-stats'] = array(
+        '#attributes' => array(
+          'class' => array('user-achievement-stats'),
+        ),
+        'count' => $achiever->rank,
+        '#suffix' => $suffix,
+        'path' => url('achievements/leaderboard'),
+      );
+
+      // Get achievement points current user.
+      $suffix = t('Points earned by you');
+      $stats['user-achievement-points'] = array(
+        '#attributes' => array(
+          'class' => array('user-achievement-points'),
+        ),
+        'count' => $achiever->points,
+        '#suffix' => $suffix,
+        'path' => url('user/' . $user->uid  . '/achievements'),
+      );
+
+      // Get achievement points current user.
+      $suffix = format_plural($achiever->unlocks, 'Achievement unlocked by
+                you', 'Achievements unlocked by you');
+      $stats['user-achievement-unlocks'] = array(
+        '#attributes' => array(
+          'class' => array('user-achievement-unlocks'),
+        ),
+        'count' => $achiever->unlocks,
+        '#suffix' => $suffix,
+        'path' => url('user/' . $user->uid  . '/achievements'),
+      );
+      break;
+  }
+
+  /*$options['bt_achievement_badge'] = array(
+    'cssSelect' => '.achievement-badge',
+    'contentSelector' => '$(this).find(".achievement-title").html()',
+    'trigger' => array('mouseover', 'click'),
+    'width' => 150,
+  );
+  beautytips_add_beautytips($options); */
+  return theme('commons_achievements_user', array('badges' => $badges, 'stats' => $stats));
+}
+
+
+/**
+ * Get top achievers.. urbandictionary.com/define.php?term=achiever
+ */
+function _commons_achievements_top_achievers() {
+  $query = db_select('achievement_totals', 'at');
+  $query->addTag('achievement_totals')->join('users', 'u', 'u.uid = at.uid');
+  $query->fields('at', array('uid', 'points', 'unlocks'))->fields('u', array('name'));
+  $query->orderBy('at.points', 'DESC')->orderBy('at.timestamp');
+  $query->range(0, variable_get('achievements_leaderboard_block_count_top', 5));
+  $achievers= $query->execute()->fetchAllAssoc('uid');
+
+  return $achievers;
+}

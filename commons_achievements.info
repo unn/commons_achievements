@@ -1,0 +1,5 @@
+name = Commons achievements
+description = Achievements for Commons
+core = 7.x
+
+dependencies[] = achievements
